@@ -86,9 +86,9 @@ void MuseScore::updateInputState(Score* score)
                         changeState(STATE_NOTE_ENTRY_STAFF_PITCHED);
                         break;
                   case StaffGroup::TAB:
-					  changeState(STATE_NOTE_ENTRY_STAFF_TAB);
+				changeState(STATE_NOTE_ENTRY_STAFF_TAB);
                         break;
-				  case StaffGroup::NUMERIC:
+		      case StaffGroup::NUMERIC:
                         changeState(STATE_NOTE_ENTRY_STAFF_NUMERIC);
                         break;
                   case StaffGroup::PERCUSSION:
