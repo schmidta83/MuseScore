@@ -45,6 +45,7 @@
 #include "stafflines.h"
 #include "bracketItem.h"
 #include "global/log.h"
+#include "timesig.h"
 
 namespace Ms {
 
@@ -55,6 +56,15 @@ namespace Ms {
 SysStaff::~SysStaff()
       {
       qDeleteAll(instrumentNames);
+      }
+
+//---------------------------------------------------------
+//   yBottom
+//---------------------------------------------------------
+
+qreal SysStaff::yBottom() const
+      {
+      return skyline().south().valid() ? skyline().south().max() : _height;
       }
 
 //---------------------------------------------------------
@@ -667,6 +677,17 @@ void System::layout2()
             staffDistance       = score()->styleP(Sid::minStaffSpread);
             akkoladeDistance    = score()->styleP(Sid::minStaffSpread);
             }
+      qreal numerictimesigStart=0.0;
+      int numericAnzalStaff=0;
+      Staff* numericFirstStaff  = 0;
+      TimeSig* numericTimesig = 0;
+	  Fraction tickk = tick();
+	  if (nextSegmentElement())
+		  tickk = nextSegmentElement()->tick();
+	  int si = firstVisibleSysStaff();
+	  SysStaff* sfirstVisibleSysStaff = si < 0 ? nullptr : staff(si);
+	  sfirstVisibleSysStaff->set_distanceFirstStaff(0);
+
 
       if (visibleStaves.empty()) {
             qDebug("====no visible staves, staves %d, score staves %d", _staves.size(), score()->nstaves());
@@ -679,6 +700,45 @@ void System::layout2()
             Staff* staff  = score()->staff(si1);
             auto ni       = i + 1;
 
+			ss->set_distanceFirstStaff(y);
+            if(staff && staff->isNumericStaff(tickk)){
+                  numericAnzalStaff++;
+                  staffDistance       = score()->styleP(Sid::numericStaffDistans);
+                  if (numericAnzalStaff==1){
+                        numericFirstStaff = staff;
+                        numericTimesig = numericFirstStaff->nextTimeSig(tickk);
+                        numerictimesigStart = y;
+                        }
+                  else {
+
+                        if(numericAnzalStaff>1){
+                              TimeSig* sig = staff->nextTimeSig(tickk);
+                              while (sig) {
+                                    sig->set_numericVisible(false);
+                                    sig = staff->nextTimeSig(sig->tick() + Fraction::fromTicks(1));
+                                    }
+                              }
+                        }
+                  if(numericTimesig){
+                        numericTimesig->set_numericVisible(true);
+                        numericTimesig->rypos() =(y - numerictimesigStart)/2;
+                        numericTimesig->set_numericBarLinelength(y - numerictimesigStart);
+                        TimeSig* sig = numericFirstStaff->nextTimeSig(tickk + Fraction::fromTicks(1));
+                        while (sig) {
+                              sig->set_numericVisible(true);
+                              sig->rypos() =(y - numerictimesigStart)/2;
+                              sig->set_numericBarLinelength(y - numerictimesigStart);
+                              sig = numericFirstStaff->nextTimeSig(sig->tick() + Fraction::fromTicks(1));
+                              }
+                        }
+
+                  }
+            else {
+                  numericAnzalStaff=0;
+                  numericFirstStaff=0;
+                  numericTimesig = 0;
+                  staffDistance       = score()->styleP(Sid::staffDistance);
+                  }
             qreal dist = staff->height();
             qreal yOffset;
             qreal h;
@@ -1540,27 +1600,78 @@ qreal System::spacerDistance(bool up) const
       if (staff < 0)
             return 0.0;
       qreal dist = 0.0;
-      activeSpacer = nullptr;
       for (MeasureBase* mb : measures()) {
             if (mb->isMeasure()) {
                   Measure* m = toMeasure(mb);
                   Spacer* sp = up ? m->vspacerUp(staff) : m->vspacerDown(staff);
                   if (sp) {
                         if (sp->spacerType() == SpacerType::FIXED) {
-                              activeSpacer = sp;
                               dist = sp->gap();
                               break;
                               }
-                        else {
-                              if (sp->gap() > dist) {
-                                    activeSpacer = sp;
-                                    dist = sp->gap();
-                                    }
-                              }
+                        else
+                              dist = qMax(dist, sp->gap());
                         }
                   }
             }
       return dist;
+      }
+
+//---------------------------------------------------------
+//   upSpacer
+//    Return largest upSpacer for this system. This can
+//    be a downSpacer of the previous system.
+//---------------------------------------------------------
+
+Spacer* System::upSpacer(int staffIdx, Spacer* prevDownSpacer) const
+      {
+      if (staffIdx < 0)
+            return nullptr;
+
+      if (prevDownSpacer && (prevDownSpacer->spacerType() == SpacerType::FIXED))
+            return prevDownSpacer;
+
+      Spacer* spacer { prevDownSpacer };
+      for (MeasureBase* mb : measures()) {
+            if (!(mb && mb->isMeasure()))
+                  continue;
+            Spacer* sp { toMeasure(mb)->vspacerUp(staffIdx)} ;
+            if (sp) {
+                  if (!spacer || ((spacer->spacerType() == SpacerType::UP) && (sp->gap() > spacer->gap()))) {
+                        spacer = sp;
+                        }
+                  continue;
+                  }
+            }
+      return spacer;
+      }
+
+//---------------------------------------------------------
+//   downSpacer
+//    Return the largest downSpacer for this system.
+//---------------------------------------------------------
+
+Spacer* System::downSpacer(int staffIdx) const
+      {
+      if (staffIdx < 0)
+            return nullptr;
+
+      Spacer* spacer { nullptr };
+      for (MeasureBase* mb : measures()) {
+            if (!(mb && mb->isMeasure()))
+                  continue;
+            Spacer* sp { toMeasure(mb)->vspacerDown(staffIdx) };
+            if (sp) {
+                  if (sp->spacerType() == SpacerType::FIXED) {
+                        return sp;
+                        }
+                  else {
+                        if (!spacer || (sp->gap() > spacer->gap()))
+                              spacer = sp;
+                        }
+                  }
+            }
+      return spacer;
       }
 
 //---------------------------------------------------------

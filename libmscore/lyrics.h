@@ -51,7 +51,8 @@ class Lyrics final : public TextBase {
       Syllabic _syllabic;
       LyricsLine* _separator;
 
-      bool isMelisma() const;
+	  int _staffShift;
+
       void undoChangeProperty(Pid id, const QVariant&, PropertyFlags ps) override;
 
    protected:
@@ -75,6 +76,7 @@ class Lyrics final : public TextBase {
 
       void layout() override;
       void layout2(int);
+	  void layout3();
 
       void write(XmlWriter& xml) const override;
       void read(XmlReader&) override;
@@ -83,7 +85,7 @@ class Lyrics final : public TextBase {
       QString subtypeName() const override    { return QObject::tr("Verse %1").arg(_no + 1); }
       void setNo(int n)                               { _no = n; }
       int no() const                                  { return _no; }
-      bool isEven() const                             { return _no % 1; }
+      bool isEven() const                             { return _no & 1; }
       void setSyllabic(Syllabic s)                    { _syllabic = s; }
       Syllabic syllabic() const                       { return _syllabic; }
       void add(Element*) override;
@@ -93,6 +95,7 @@ class Lyrics final : public TextBase {
       Fraction ticks() const                          { return _ticks;    }
       void setTicks(const Fraction& tick)             { _ticks = tick;    }
       Fraction endTick() const;
+      bool isMelisma() const;
       void removeFromScore();
 
       using ScoreElement::undoChangeProperty;
@@ -101,6 +104,8 @@ class Lyrics final : public TextBase {
       QVariant getProperty(Pid propertyId) const override;
       bool setProperty(Pid propertyId, const QVariant&) override;
       QVariant propertyDefault(Pid id) const override;
+	  int getStaffShift() { return _staffShift; }
+      void setStaffShift(int n) { _staffShift = n; }
       };
 
 //---------------------------------------------------------

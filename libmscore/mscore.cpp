@@ -88,6 +88,7 @@ qreal   MScore::horizontalPageGapEven = 1.0;
 qreal   MScore::horizontalPageGapOdd = 50.0;
 
 QColor  MScore::selectColor[VOICES];
+QColor  MScore::cursorColor;
 QColor  MScore::defaultColor;
 QColor  MScore::layoutBreakColor;
 QColor  MScore::frameMarginColor;
@@ -376,6 +377,7 @@ void MScore::init()
             ":/fonts/mscore/MScoreText.ttf",
             ":/fonts/petaluma/PetalumaText.otf",
             ":/fonts/petaluma/PetalumaScript.otf",
+            ":/fonts/numeric/Numeric.ttf",
             };
 
       for (unsigned i = 0; i < sizeof(fonts)/sizeof(*fonts); ++i) {

@@ -11,6 +11,7 @@
 //=============================================================================
 
 #include "accidental.h"
+#include "arpeggio.h"
 #include "barline.h"
 #include "beam.h"
 #include "box.h"
@@ -1328,6 +1329,10 @@ void Score::hideEmptyStaves(System* system, bool isFirstSystem)
       int staffIdx = 0;
       bool systemIsEmpty = true;
 
+      Fraction stick = system->measures().front()->tick();
+      Fraction etick = system->measures().back()->endTick();
+      auto spanners = score()->spannerMap().findOverlapping(stick.ticks(), etick.ticks() - 1);
+
       for (Staff* staff : qAsConst(_staves)) {
             SysStaff* ss  = system->staff(staffIdx);
 
@@ -1339,6 +1344,13 @@ void Score::hideEmptyStaves(System* system, bool isFirstSystem)
                     && !(isFirstSystem && styleB(Sid::dontHideStavesInFirstSystem))
                     && hideMode != Staff::HideMode::NEVER)) {
                   bool hideStaff = true;
+                  for (auto spanner : spanners) {
+                        if (spanner.value->staff() == staff
+                         && !spanner.value->systemFlag()) {
+                              hideStaff = false;
+                              break;
+                              }
+                        }
                   for (MeasureBase* m : system->measures()) {
                         if (!m->isMeasure())
                               continue;
@@ -1516,6 +1528,101 @@ void Score::connectTies(bool silent)
       }
 
 //---------------------------------------------------------
+//   connectArpeggios
+//  Fake cross-voice arpeggios by hiding all but the first
+//  and extending the first to cover the others.
+//  Retains the other properties of the first arpeggio.
+//---------------------------------------------------------
+
+void Score::connectArpeggios()
+      {
+      for (auto segment = firstSegment(SegmentType::ChordRest); segment; segment = segment->next1(SegmentType::ChordRest)) {
+            for (int staff = 0; staff < nstaves(); ++staff) {
+                  qreal minTop = 10000;
+                  qreal maxBottom = -10000;
+                  int firstArpeggio = -1;
+                  bool multipleArpeggios = false;
+                  for (int i = staff2track(staff); i < staff2track(staff + 1); ++i) {
+                        if (segment->elist()[i] && segment->elist()[i]->isChord()) {
+                              Chord* chord = toChord(segment->elist()[i]);
+                              if (chord->arpeggio() && chord->arpeggio()->visible()) {
+                                    if (chord->pagePos() == QPointF(0, 0)) doLayout();
+                                    qreal localTop = chord->arpeggio()->pageBoundingRect().top();                   
+                                    qreal localBottom = chord->arpeggio()->pageBoundingRect().bottom();                             
+                                    minTop = qMin(localTop, minTop);
+                                    maxBottom = qMax(localBottom, maxBottom);
+                                    if (firstArpeggio == -1)
+                                          // Leave arpeggio, adjust height after collecting
+                                          firstArpeggio = i;
+                                    else {
+                                          // Hide arpeggio; firstArpeggio will be extended to cover it.
+                                          chord->arpeggio()->setVisible(false);                                          
+                                          multipleArpeggios = true;
+                                          }
+                                    }
+                              }
+                        }
+                  if (firstArpeggio != -1 && multipleArpeggios) {
+                        // Stretch first arpeggio to cover deleted
+                        Chord* firstArpeggioChord = toChord(segment->elist()[firstArpeggio]);
+                        Arpeggio* arpeggio = firstArpeggioChord->arpeggio();
+                        qreal topDiff = minTop - arpeggio->pageBoundingRect().top();
+                        qreal bottomDiff = maxBottom - arpeggio->pageBoundingRect().bottom();
+                        arpeggio->setUserLen1(topDiff);
+                        arpeggio->setUserLen2(bottomDiff);
+                        arpeggio->setPropertyFlags(Pid::ARP_USER_LEN1, PropertyFlags::UNSTYLED);
+                        arpeggio->setPropertyFlags(Pid::ARP_USER_LEN2, PropertyFlags::UNSTYLED);
+                        }
+                  }
+            }
+      }
+
+//---------------------------------------------------------
+//   fixupLaissezVibrer
+//    This is a temporary hack to improve the placement of
+//    l.v. articulations when importing MusciXML.
+//    TODO: vastly improve the automatic placement of the
+//    l.v. articulation.
+//---------------------------------------------------------
+
+void Score::fixupLaissezVibrer()
+      {
+      int tracks = nstaves() * VOICES;
+      Measure* m = firstMeasure();
+      if (!m)
+            return;
+      if (m->canvasPos() == QPointF(0, 0))
+            doLayout();
+
+      SegmentType st = SegmentType::ChordRest;
+      for (Segment* s = m->first(st); s; s = s->next1(st)) {
+            for (int i = 0; i < tracks; ++i) {
+                  Element* e = s->element(i);
+                  if (e == 0 || !e->isChord())
+                        continue;
+                  Chord* c = toChord(e);
+                  for (auto a : c->articulations()) {
+                        if (a->symId() != SymId::articLaissezVibrerAbove && a->symId() != SymId::articLaissezVibrerBelow)
+                              continue;
+
+                        // Manually override placement
+                        a->setAutoplace(false);
+                        a->setMinDistance(Spatium(0));
+                        c->layoutArticulations();
+                        c->layoutArticulations2();
+                        bool below = a->symId() == SymId::articLaissezVibrerBelow;
+                        Note* n = below ? c->notes().front() : c->notes().back();
+
+                        QPointF target = below  ? n->canvasBoundingRect().bottomLeft() + QPointF(0.5 * n->width(), 0.25 * spatium())
+                                                : n->canvasBoundingRect().topLeft() + QPointF(0.5 * n->width(), -0.25 * spatium());
+                        QPointF current = below ? a->canvasBoundingRect().topLeft() : a->canvasBoundingRect().bottomLeft();
+                        a->setOffset(a->offset() + target - current);
+                        }
+                  }
+            }
+      }
+
+//---------------------------------------------------------
 //   checkDivider
 //---------------------------------------------------------
 
@@ -1574,8 +1681,9 @@ static void distributeStaves(Page* page)
       int    ngaps { 0 };
       qreal  prevYBottom  { page->tm() };
       qreal  yBottom      { 0.0        };
+      qreal  spacerOffset { 0.0        };
       bool   vbox         { false      };
-      Spacer* activeSpacer { nullptr    };
+      Spacer* nextSpacer  { nullptr    };
       bool transferNormalBracket { false };
       bool transferCurlyBracket  { false };
       for (System* system : page->systems()) {
@@ -1614,8 +1722,8 @@ static void distributeStaves(Page* page)
                         if (!sysStaff->show())
                               continue;
 
-                        VerticalGapData* vgd = new VerticalGapData(!ngaps++, system, staff, sysStaff, activeSpacer, prevYBottom);
-                        activeSpacer = nullptr;
+                        VerticalGapData* vgd = new VerticalGapData(!ngaps++, system, staff, sysStaff, nextSpacer, prevYBottom);
+                        nextSpacer = system->downSpacer(staff->idx());
 
                         if (newSystem) {
                               vgd->addSpaceBetweenSections();
@@ -1640,20 +1748,20 @@ static void distributeStaves(Page* page)
                               vbox = false;
                               }
 
-                        prevYBottom = system->y() + sysStaff->y() + sysStaff->bbox().height();
-                        yBottom     = system->y() + sysStaff->y() + sysStaff->skyline().south().max();
+                        prevYBottom  = system->y() + sysStaff->y() + sysStaff->bbox().height();
+                        yBottom      = system->y() + sysStaff->y() + sysStaff->skyline().south().max();
+                        spacerOffset = sysStaff->skyline().south().max() - sysStaff->bbox().height();
                         vgdl.append(vgd);
                         }
                   transferNormalBracket = endNormalBracket >= 0;
                   transferCurlyBracket  = endCurlyBracket >= 0;
                   }
-            activeSpacer = system->getActiveSpacer();
             }
       --ngaps;
 
       qreal spaceLeft { page->height() - page->bm() - score->styleP(Sid::staffLowerBorder) - yBottom };
-      if (activeSpacer)
-          spaceLeft -= activeSpacer->gap();
+      if (nextSpacer)
+            spaceLeft -= qMax(0.0, nextSpacer->gap() - spacerOffset - score->styleP(Sid::staffLowerBorder));
       if (spaceLeft <= 0.0)
             return;
 
@@ -1689,8 +1797,9 @@ static void distributeStaves(Page* page)
                   }
             if ((spaceLeft - addedSpace) <= 0.0)
                   {
-                  for (VerticalGapData* vgd : modified)
+                  for (VerticalGapData* vgd : modified) {
                         vgd->undoLastAddSpacing();
+                        }
                   ngaps = 0;
                   }
             else {
@@ -1699,17 +1808,19 @@ static void distributeStaves(Page* page)
             }
 
       // If there is still space left, distribute the space of the staves.
+      // However, there is a limit on how much space is added per gap.
       const qreal maxPageFill { score->styleP(Sid::maxPageFillSpread) };
+      spaceLeft = qMin(maxPageFill * vgdl.length(), spaceLeft);
       pass = 0;
       ngaps = 1;
       while (!almostZero(spaceLeft) && !almostZero(maxPageFill) && (ngaps > 0) && (++pass < maxPasses)) {
             ngaps = 0;
             qreal addedSpace { 0.0 };
+            qreal step {spaceLeft / vgdl.sumStretchFactor() };
             for (VerticalGapData* vgd : vgdl) {
-                  qreal step = spaceLeft / vgdl.sumStretchFactor();
-                  step = vgd->addFillSpacing(step, maxPageFill);
-                  if (!almostZero(step)) {
-                        addedSpace += step * vgd->factor();
+                  qreal res { vgd->addFillSpacing(step, maxPageFill) };
+                  if (!almostZero(res)) {
+                        addedSpace += res * vgd->factor();
                         ++ngaps;
                         }
                   }
@@ -3301,16 +3412,19 @@ static void applyLyricsMax(Segment& s, int staffIdx, qreal yMax)
       {
       if (!s.isChordRestType())
             return;
-      Skyline& sk = s.measure()->system()->staff(staffIdx)->skyline();
       for (int voice = 0; voice < VOICES; ++voice) {
-            ChordRest* cr = s.cr(staffIdx * VOICES + voice);
+		    ChordRest* cr = s.cr(staffIdx * VOICES + voice);
             if (cr && !cr->lyrics().empty()) {
                   qreal lyricsMinBottomDistance = s.score()->styleP(Sid::lyricsMinBottomDistance);
                   for (Lyrics* l : cr->lyrics()) {
                         if (l->autoplace() && l->placeBelow()) {
+							int schift = staffIdx + l->getStaffShift();
+							if (s.score()->nstaves() <= schift)
+								schift = s.score()->nstaves() - 1;
                               l->rypos() += yMax - l->propertyDefault(Pid::OFFSET).toPointF().y();
                               if (l->addToSkyline()) {
                                     QPointF offset = l->pos() + cr->pos() + s.pos() + s.measure()->pos();
+									Skyline& sk = s.measure()->system()->staff(schift)->skyline();
                                     sk.add(l->bbox().translated(offset).adjusted(0.0, 0.0, 0.0, lyricsMinBottomDistance));
                                     }
                               }
@@ -3331,11 +3445,14 @@ static void applyLyricsMax(Measure* m, int staffIdx, qreal yMax)
 
 static void applyLyricsMin(ChordRest* cr, int staffIdx, qreal yMin)
       {
-      Skyline& sk = cr->measure()->system()->staff(staffIdx)->skyline();
       for (Lyrics* l : cr->lyrics()) {
             if (l->autoplace() && l->placeAbove()) {
+				  int schift = staffIdx - l->getStaffShift();
+				  if (0 > schift)
+					    schift = 0;
                   l->rypos() += yMin - l->propertyDefault(Pid::OFFSET).toPointF().y();
                   if (l->addToSkyline()) {
+					    Skyline& sk = cr->measure()->system()->staff(schift)->skyline();
                         QPointF offset = l->pos() + cr->pos() + cr->segment()->pos() + cr->segment()->measure()->pos();
                         sk.add(l->bbox().translated(offset));
                         }
@@ -3494,6 +3611,42 @@ void Score::layoutLyrics(System* system)
             }
       }
 
+	  //---------------------------------------------------------
+	  //   layoutTies
+	  //---------------------------------------------------------
+
+void Score::LyricsLayout3(System* system, LayoutContext& lc)
+	  {
+	  for (int staffIdx = system->firstVisibleStaff(); staffIdx < system->score()->nstaves(); staffIdx = system->nextVisibleStaff(staffIdx)) {
+		    for (MeasureBase* mb : system->measures()) {
+			      if (!mb->isMeasure())
+				        continue;
+			      Measure* m = toMeasure(mb);
+			      for (Segment& s : m->segments()) {
+				        if (s.isChordRestType()) {
+					          for (int voice = 0; voice < VOICES; ++voice) {
+						            ChordRest* cr = s.cr(staffIdx * VOICES + voice);
+						            if (cr) {
+							              for (Lyrics* l : cr->lyrics()) {
+								                l->layout3();
+							                    }
+						                  }
+					                }
+				              }
+			            }
+		          }
+	        }
+
+	  bool useRange = false;  // TODO: lineMode();
+	  Fraction stick = useRange ? lc.startTick : system->measures().front()->tick();
+	  Fraction etick = useRange ? lc.endTick : system->measures().back()->endTick();
+	  for (Spanner* sp : _unmanagedSpanner) {
+		  if (sp->tick() > etick || sp->tick2() <= stick)
+			  continue;
+		  sp->layoutSystem(system);
+	  }
+
+	  }
 //---------------------------------------------------------
 //   layoutTies
 //---------------------------------------------------------
@@ -3941,8 +4094,8 @@ System* Score::collectSystem(LayoutContext& lc)
                               if (!s->enabled())
                                     s->setEnabled(true);
                               }
-                        // TODO: use findPotentialSectionBreak here to handle breaks on frames correctly?
-                        bool firstSystem = lc.prevMeasure->sectionBreak() && _layoutMode != LayoutMode::FLOAT;
+                        const MeasureBase* pbmb = lc.prevMeasure->findPotentialSectionBreak();
+                        bool firstSystem = pbmb->sectionBreak() && _layoutMode != LayoutMode::FLOAT;
                         if (curHeader)
                               m->addSystemHeader(firstSystem);
                         else
@@ -4067,6 +4220,7 @@ System* Score::collectSystem(LayoutContext& lc)
 
       layoutSystemElements(system, lc);
       system->layout2();   // compute staff distances
+	  LyricsLayout3(system, lc);
       // TODO: now that the code at the top of this function does this same backwards search,
       // we might be able to eliminate this block
       // but, lc might be used elsewhere so we need to be careful
@@ -4461,11 +4615,11 @@ void Score::layoutSystemElements(System* system, LayoutContext& lc)
       layoutLyrics(system);
 
       // here are lyrics dashes and melisma
-      for (Spanner* sp : _unmanagedSpanner) {
-            if (sp->tick() >= etick || sp->tick2() <= stick)
-                  continue;
-            sp->layoutSystem(system);
-            }
+      //for (Spanner* sp : _unmanagedSpanner) {
+      //     if (sp->tick() >= etick || sp->tick2() <= stick)
+      //            continue;
+      //      sp->layoutSystem(system);
+      //      }
 
       //
       // We need to known if we have FretDiagrams in the system to decide when to layout the Harmonies
@@ -4521,6 +4675,28 @@ void Score::layoutSystemElements(System* system, LayoutContext& lc)
             }
 
       //-------------------------------------------------------------
+      // FretDiagram
+      //-------------------------------------------------------------
+
+      if (hasFretDiagram) {
+            for (const Segment* s : sl) {
+                  for (Element* e : s->annotations()) {
+                        if (e->isFretDiagram())
+                              e->layout();
+                        }
+                  }
+
+            //-------------------------------------------------------------
+            // Harmony, 2nd place
+            // We have FretDiagrams, we want the Harmony above this and
+            // above the volta.
+            //-------------------------------------------------------------
+
+            layoutHarmonies(sl);
+            alignHarmonies(system, sl, false, styleP(Sid::maxFretShiftAbove), styleP(Sid::maxFretShiftBelow));
+            }
+
+      //-------------------------------------------------------------
       // TempoText
       //-------------------------------------------------------------
 
@@ -4573,28 +4749,6 @@ void Score::layoutSystemElements(System* system, LayoutContext& lc)
 
                   voltaSegments.erase(voltaSegments.begin(), voltaSegments.begin() + idx);
                   }
-            }
-
-      //-------------------------------------------------------------
-      // FretDiagram
-      //-------------------------------------------------------------
-
-      if (hasFretDiagram) {
-            for (const Segment* s : sl) {
-                  for (Element* e : s->annotations()) {
-                        if (e->isFretDiagram())
-                              e->layout();
-                        }
-                  }
-
-            //-------------------------------------------------------------
-            // Harmony, 2nd place
-            // We have FretDiagrams, we want the Harmony above this and
-            // above the volta.
-            //-------------------------------------------------------------
-
-            layoutHarmonies(sl);
-            alignHarmonies(system, sl, false, styleP(Sid::maxFretShiftAbove), styleP(Sid::maxFretShiftBelow));
             }
 
       //-------------------------------------------------------------
@@ -4845,6 +4999,36 @@ void LayoutContext::collectPage()
                               }
                         }
                   m->layout2();
+
+                  for (int track = 0; track < currentScore->ntracks(); ++track) {
+                        for (Segment* segment = m->first(); segment; segment = segment->next()) {
+                              Element* e = segment->element(track);
+
+                              if (!e)
+                                    continue;
+                              else if (e->isTimeSig()&&segment->isTimeSigType()){
+                                    if(toTimeSig(e)->get_numericVisible()){
+                                          qreal w=0.0;
+                                          if(m->first() && m->first()->firstElement(0) && m->first()->isBeginBarLineType())
+                                                w = m->first()->firstElement(0)->width();
+                                          if(m->prevMeasure() && m->prevMeasure()->last() && m->prevMeasure()->last()->firstElement(0)
+                                                  && m->prevMeasure()->last()->isEndBarLineType())
+                                                w =qMax(w, m->prevMeasure()->last()->firstElement(0)->width());
+                                          if(m->prevMeasure() && m->prevMeasure()->last() && m->prevMeasure()->last()->prev()
+                                                  && m->prevMeasure()->last()->prev()->firstElement(0)
+                                                  && m->prevMeasure()->last()->prev()->isEndBarLineType())
+                                                w =qMax(w, m->prevMeasure()->last()->prev()->firstElement(0)->width());
+                                          TimeSig* sig1 = toTimeSig(e);
+                                          sig1->set_numericXpos(-segment->rxpos()- w);
+                                          sig1->layout2();
+                                          }
+                                    }
+                              else if (e->isKeySig()){
+                                    KeySig* sig1 = toKeySig(e);
+                                    sig1->layout2();
+                                    }
+                              }
+                        }
                   }
             }
 
@@ -4981,7 +5165,7 @@ void Score::doLayoutRange(const Fraction& st, const Fraction& et)
             else {
                   const MeasureBase* mb = lc.nextMeasure->prev();
                   if (mb)
-                        mb->findPotentialSectionBreak();
+                        mb = mb->findPotentialSectionBreak();
                   LayoutBreak* sectionBreak = mb->sectionBreakElement();
                   // TODO: also use mb in else clause here?
                   // probably not, only actual measures have meaningful numbers
@@ -5104,9 +5288,10 @@ LayoutContext::~LayoutContext()
 
 //---------------------------------------------------------
 //   VerticalStretchData
+//      defines a gap ABOVE the staff.
 //---------------------------------------------------------
 
-VerticalGapData::VerticalGapData(bool first, System *sys, Staff *st, SysStaff *sst, const Spacer* spacer, qreal y)
+VerticalGapData::VerticalGapData(bool first, System *sys, Staff *st, SysStaff *sst, Spacer* nextSpacer, qreal y)
       : _fixedHeight(first), system(sys), sysStaff(sst), staff(st)
       {
       if (_fixedHeight) {
@@ -5114,14 +5299,17 @@ VerticalGapData::VerticalGapData(bool first, System *sys, Staff *st, SysStaff *s
             _maxActualSpacing = _normalisedSpacing;
             }
       else {
+            _normalisedSpacing = system->y() + (sysStaff ? sysStaff->bbox().y() : 0.0) - y;
+            _maxActualSpacing = system->score()->styleP(Sid::maxStaffSpread);
+
+            Spacer* spacer { staff ? system->upSpacer(staff->idx(), nextSpacer) : nullptr };
+
             if (spacer) {
-                  _fixedHeight = true;
-                  _normalisedSpacing = spacer->gap();
-                  _maxActualSpacing = _normalisedSpacing;
-                  }
-            else {
-                  _normalisedSpacing = system->y() + (sysStaff ? sysStaff->y() : 0.0) - y;
-                  _maxActualSpacing = system->score()->styleP(Sid::maxStaffSpread);
+                  _fixedSpacer = spacer->spacerType() == SpacerType::FIXED;
+                  _normalisedSpacing = qMax(_normalisedSpacing, spacer->gap());
+                  if (_fixedSpacer) {
+                        _maxActualSpacing = _normalisedSpacing;
+                        }
                   }
             }
       }
@@ -5146,8 +5334,8 @@ void VerticalGapData::updateFactor(qreal factor)
 void VerticalGapData::addSpaceBetweenSections()
       {
       updateFactor(system->score()->styleD(Sid::spreadSystem));
-      if (!_fixedHeight)
-            _maxActualSpacing = qMax(_maxActualSpacing, system->score()->styleP(Sid::maxSystemSpread));
+      if (!(_fixedHeight | _fixedSpacer))
+            _maxActualSpacing = system->score()->styleP(Sid::maxSystemSpread) / _factor;
       }
 
 //---------------------------------------------------------
@@ -5160,7 +5348,7 @@ void VerticalGapData::addSpaceAroundVBox(bool above)
       _factor = 1.0;
       const Score* score { system->score() };
       _normalisedSpacing = above ? score->styleP(Sid::frameSystemDistance) : score->styleP(Sid::systemFrameDistance);
-      _maxActualSpacing = _normalisedSpacing;
+      _maxActualSpacing = _normalisedSpacing / _factor;
       }
 
 //---------------------------------------------------------
@@ -5187,7 +5375,7 @@ void VerticalGapData::addSpaceAroundCurlyBracket()
 
 void VerticalGapData::insideCurlyBracket()
       {
-      _maxActualSpacing = system->score()->styleP(Sid::maxAkkoladeDistance);
+      _maxActualSpacing = system->score()->styleP(Sid::maxAkkoladeDistance) / _factor;
       }
 
 //---------------------------------------------------------
@@ -5224,9 +5412,9 @@ qreal VerticalGapData::actualAddedSpace() const
 
 qreal VerticalGapData::addSpacing(qreal step)
       {
-      if (_fixedHeight)
+      if (_fixedHeight | _fixedSpacer)
             return 0.0;
-      if ((_normalisedSpacing >= _maxActualSpacing)) {
+      if (_normalisedSpacing >= _maxActualSpacing) {
             _normalisedSpacing = _maxActualSpacing;
             step = 0.0;
             }
@@ -5246,7 +5434,7 @@ qreal VerticalGapData::addSpacing(qreal step)
 
 bool VerticalGapData::isFixedHeight() const
       {
-      return _fixedHeight;
+      return _fixedHeight || almostZero(_normalisedSpacing - _maxActualSpacing);
       }
 
 //---------------------------------------------------------
@@ -5265,8 +5453,11 @@ void VerticalGapData::undoLastAddSpacing()
 
 qreal VerticalGapData::addFillSpacing(qreal step, qreal maxFill)
       {
-      qreal res = addSpacing(qMin(maxFill - _fillSpacing, step));
-      _fillSpacing += res;
+      if (_fixedSpacer)
+            return 0.0;
+      qreal actStep { ((step + _fillSpacing / _factor) > maxFill) ? (maxFill - _fillSpacing / _factor) : step};
+      qreal res = addSpacing(actStep);
+      _fillSpacing += res * _factor;
       return res;
       }
 
@@ -5287,8 +5478,10 @@ void VerticalGapDataList::deleteAll()
 qreal VerticalGapDataList::sumStretchFactor() const
       {
       qreal sum { 0.0 };
-      for (VerticalGapData* vsd : *this)
-            sum += vsd->factor();
+      for (VerticalGapData* vsd : *this) {
+            if (!vsd->isFixedHeight())
+                  sum += vsd->factor();
+            }
       return sum;
       }
 
@@ -5309,5 +5502,4 @@ qreal VerticalGapDataList::smallest(qreal limit) const
             }
       return vdp ? vdp->spacing() : 0.0;
       }
-
 }

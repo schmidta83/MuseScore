@@ -1428,6 +1428,55 @@ enum class Sid {
       usePre_3_6_defaults,
       defaultsVersion,
 
+      numericHeightDisplacement,
+      numericDistanceOctave,
+      numericHeigthLine,
+      numericOffsetLine,
+      numericDistanceBetweenLines,
+      numericWideLine,
+      numericThickLine,
+      numericSizeSignSharp,
+      numericSizeSignFlat,
+      numericDistanceSignSharp,
+      numericDistanceSignFlat,
+      numericHeigthSignSharp,
+      numericHeigthSignFlat,
+      numericFont,
+      numericSlurEckenform,
+      numericSlurThick,
+      numericSlurHeigth,
+      numericSlurUberhang,
+      numericSlurShift,
+      numericLedgerlineThick,
+      numericLedgerlineLength,
+      numericLedgerlineShift,
+      numericStaffDistans,
+      numericTimeSigSize,
+      numericTimeSigDistance,
+      numericTimeSigLineThick,
+      numericTimeSigLineSize,
+      numericTimeSigFont,
+      numericKeySigFont,
+      numericKeySigSize,
+      numericKeySigHorizontalShift,
+      numericKeySigHigth,
+      numericKeysigNoteDistancLeft,
+      numericKeysigNoteDistancReigth,
+      numericBarlineLength,
+      numericFontSize,
+      numericRestDistanc,
+      numericNoteDistanc,
+      numericAccidentalFont,
+      numericTupletSlurEcke,
+      numericTupletSlurhigth,
+      numericTupletSlurdistans,
+      numericTupletSlurshift,
+      numericTupletSluruberhang,
+      numericTupletNummerHigth,
+      numericTupletSlurThickness,
+      numericTupletNummerFontSize,
+      numericTupletNummerFont,
+
       STYLES
       ///\}
       };
@@ -1516,6 +1565,7 @@ const std::vector<Tid>& allTextStyles();
 const std::vector<Tid>& primaryTextStyles();
 
 QSet<Sid> pageStyles();
+QSet<Sid> fretStyles();
 
 #ifndef NDEBUG
 extern void checkStyles();
