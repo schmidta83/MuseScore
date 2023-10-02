@@ -51,7 +51,8 @@ class Lyrics final : public TextBase {
       Syllabic _syllabic;
       LyricsLine* _separator;
 
-	  int _staffShift;
+      bool isMelisma() const;
+      int _staffShift;
 
       void undoChangeProperty(Pid id, const QVariant&, PropertyFlags ps) override;
 

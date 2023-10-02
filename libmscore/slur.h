@@ -54,6 +54,7 @@ class SlurSegment final : public SlurTieSegment {
 class Slur final : public SlurTie {
 
       void slurPosChord(SlurPos*);
+      qreal _cipherHigth;
 
    public:
       Slur(Score* = 0);
@@ -75,6 +76,7 @@ class Slur final : public SlurTie {
       const SlurSegment* segmentAt(int n) const { return toSlurSegment(Spanner::segmentAt(n));   }
 
       SlurTieSegment* newSlurTieSegment() override { return new SlurSegment(score()); }
+      qreal get_cipherHigth()                      { return _cipherHigth;   }
       };
 
 }     // namespace Ms

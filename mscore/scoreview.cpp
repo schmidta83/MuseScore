@@ -3220,7 +3220,7 @@ void ScoreView::startNoteEntry()
       switch (staffGroup) {
             case StaffGroup::STANDARD:
                   break;
-            case StaffGroup::NUMERIC:
+            case StaffGroup::CIPHER:
                   //break;
             case StaffGroup::TAB: {
                   int strg = 0;
@@ -3923,8 +3923,8 @@ ScoreState ScoreView::mscoreState() const
                         return STATE_NOTE_ENTRY_STAFF_PITCHED;
                   case StaffGroup::TAB:
 					  return STATE_NOTE_ENTRY_STAFF_TAB;
-                  case StaffGroup::NUMERIC:
-                        return STATE_NOTE_ENTRY_STAFF_NUMERIC;
+                  case StaffGroup::CIPHER:
+                        return STATE_NOTE_ENTRY_STAFF_CIPHER;
                   case StaffGroup::PERCUSSION:
                         return STATE_NOTE_ENTRY_STAFF_DRUM;
                   }

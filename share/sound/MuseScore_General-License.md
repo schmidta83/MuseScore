@@ -5,15 +5,15 @@ Current version: 0.1.1  25th March 2018
 
 This is a fork of FluidR3Mono_GM.sf2, with many samples (eventually) being replaced and/or reprogrammed. This version of the SoundFont is an alpha work-in-progress. Detailed information on sample sources used can be found in MuseScore_General-sample_sources.csv. All instruments without attribution are still using samples from FluidR3Mono.
 
-FluidR3 (original version) by Frank Wen Copyright © 2000-2002
+FluidR3 (original version) by Frank Wen Copyright ï¿½ 2000-2002
 
-Mono conversion (FluidR3Mono) by Michael Cowgill Copyright © 2014-17
+Mono conversion (FluidR3Mono) by Michael Cowgill Copyright ï¿½ 2014-17
 
-Adaptation for MuseScore_General.sf2 by S. Christian Collins Copyright © 2018
+Adaptation for MuseScore_General.sf2 by S. Christian Collins Copyright ï¿½ 2018
 
-Temple Blocks instrument provided by Ethan Winer Copyright © 2002
+Temple Blocks instrument provided by Ethan Winer Copyright ï¿½ 2002
 
-Drumline Percussion provided by Michael Schorsch Copyright © 2016
+Drumline Percussion provided by Michael Schorsch Copyright ï¿½ 2016
 
 MuseScore_General.sf2 is shared under the MIT license as described in COPYING, as was FluidR3Mono and FluidR3 before it.
 
