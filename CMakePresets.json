@@ -92,6 +92,24 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }
+        },
+        {
+            "name": "Qt-Clang-RelWithDebInfo",
+            "displayName": "Qt Clang RelWithDebInfo",
+            "description": "Use current Qt with Clang compiler (RelWithDebInfo)",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "Qt-Clang-Release",
+            "displayName": "Qt Clang Release",
+            "description": "Use current Qt with Clang compiler (Release)",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
         }
     ]
 }
